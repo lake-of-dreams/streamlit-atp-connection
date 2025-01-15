@@ -4,7 +4,6 @@ README.md
 setup.py
 atp_connection/__init__.py
 atp_connection/connection.py
-atp_connection/example.py
 atp_connection/utils.py
 streamlit_atp_component.egg-info/PKG-INFO
 streamlit_atp_component.egg-info/SOURCES.txt

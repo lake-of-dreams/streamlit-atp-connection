@@ -1,4 +1,5 @@
 import io
+import re
 import string
 import random
 from typing import Dict, Any, Optional
@@ -23,10 +24,18 @@ def random_string(min_length=10, max_length=15):
 
 def random_passwd(min_length=8, max_length=15):
     length = random.randint(min_length, max_length)
-    return ''.join(
-        random.choice(string.ascii_uppercase + string.digits + string.ascii_lowercase + "#$@")
-        for _ in range(length)
-    )
+    match = False
+    passwd = ""
+    reg = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!#%*?&]{"+f"{min_length},{max_length}"+"}$"
+    pat = re.compile(reg)
+    while not match:
+        passwd = ''.join(
+            random.choice(string.ascii_uppercase + string.digits + string.ascii_lowercase + "#$@")
+            for _ in range(length)
+        )
+        match = re.search(pat, passwd)
+
+    return passwd
 
 def extract_zip(input_zip):
     input_zip = ZipFile(input_zip)
