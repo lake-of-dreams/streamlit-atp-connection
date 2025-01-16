@@ -71,8 +71,11 @@ class ATPConnection(BaseConnection):
                 match item[0]:
                     case "fields":
                         for field in item[1]:
-                            cols_part = f"{cols_part} {field['name']} "
+                            col_name = field['name'].replace(' ','_')
+                            cols_part = f"{cols_part} {col_name} "
                             match field['type']:
+                                case "number":
+                                    cols_part = f"{cols_part} NUMBER, "
                                 case "integer":
                                     cols_part = f"{cols_part} NUMBER, "
                                 case "string":
@@ -82,15 +85,28 @@ class ATPConnection(BaseConnection):
                             pk_part = f"{primary_key},{pk_part}"
             drop_stmt = f"DROP TABLE IF EXISTS {table_name} cascade constraints purge"
             create_stmt = f"CREATE TABLE {table_name} ({cols_part} PRIMARY KEY ({pk_part[:-1]}))"
+            print(create_stmt)
             cursor.execute(drop_stmt)
             cursor.execute(create_stmt)
-        df.to_sql(name=table_name,con=self.engine,if_exists="replace",index=True)
+        dtyp = {}
+        for column in df.columns:
+            if df[column].dtype == 'object':
+                dtyp[column] = sa.types.VARCHAR(df[column].astype(str).str.len().max())
+            elif df[column].dtype in ['float', 'float64']:
+                dtyp[column] = sa.FLOAT
+        df.to_sql(name=table_name,con=self.engine,if_exists="replace",index=True,dtype=dtyp)
 
 
 
-    def preview_data(self, table_name: str) -> None:
-        df = pd.read_sql(f"select * from {table_name} FETCH FIRST 50 ROWS ONLY", self.engine, chunksize=10)
+    def preview_data(self, table_name: str, callback) -> None:
+        df = pd.DataFrame()
+        reader = pd.read_sql(f"select * from {table_name} FETCH FIRST 50 ROWS ONLY",
+                             self.engine,
+                             chunksize=10)
+        for chunk in reader:
+            df = pd.concat([df, chunk], ignore_index=True)
         st.table(df)
+        callback()
 
 
 
