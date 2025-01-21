@@ -8,12 +8,19 @@ import pathlib
 
 import oci
 
-def write_files(file: io.BytesIO) -> str:
+def write_files(file: io.BytesIO, zip_file : bool) -> str:
     random_path = random_string()
     dir_name = "/tmp/"+random_path
     pathlib.Path(dir_name).mkdir(exist_ok=True)
-    ZipFile(file).extractall(dir_name)
-    return dir_name
+    file_location = ""
+    if zip_file:
+        ZipFile(file).extractall(dir_name)
+        file_location = dir_name
+    else:
+        file_path = f"{dir_name}/{random_string()}"
+        pathlib.Path(file_path).write_bytes(file)
+        file_location = file_path
+    return file_location
 
 def random_string(min_length=10, max_length=15):
     length = random.randint(min_length, max_length)
@@ -44,10 +51,16 @@ def extract_zip(input_zip):
 def get_config_param(key: str, alt: str, config: Dict[str, Any]) -> Optional[Any]:
     return config.get(key) or config.get(key.upper()) or config.get(alt) or config.get(alt.upper())
 
-def oci_config(config: Optional[Dict[str, Any]]) -> Optional[dict]:
+def oci_config(config: Optional[Dict[str, Any]] | None, config_file: str | None, profile: str | None) -> Optional[dict]:
     ociconfig = dict(oci.config.DEFAULT_CONFIG)
     if config is None:
-        ociconfig = oci.config.from_file(oci.config.DEFAULT_LOCATION, oci.config.DEFAULT_PROFILE)
+        oci_profile = "DEFAULT"
+        if (profile is not None) and (profile != ""):
+            oci_profile = profile
+        if config_file is not None:
+            ociconfig = oci.config.from_file(config_file, oci_profile)
+        else:
+            ociconfig = oci.config.from_file(oci.config.DEFAULT_LOCATION, oci_profile)
     else:
         region = get_config_param("oci_cli_region", "oci_region", config)
         user = get_config_param("oci_cli_user", "oci_user", config)

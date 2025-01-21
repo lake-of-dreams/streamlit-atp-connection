@@ -1,4 +1,5 @@
 import os
+from enum import StrEnum
 from threading import Thread
 from typing import cast
 
@@ -13,6 +14,7 @@ from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_core.documents import Document
 
 from atp_connection import ATPConnection
+from atp_connection.utils import write_files
 
 load_dotenv()
 m = st.markdown("""
@@ -49,27 +51,137 @@ class WorkerThread(Thread):
         self.func()
 
 
-def collect_data() -> None:
-    state.stage = collect_data
-    with st.form("main_page", clear_on_submit=True, border=0):
-        st.form_submit_button("Connect to an ATP", on_click=start)
-    state.completed_stage = collect_data
+class Choices(StrEnum):
+    use_default_config = "Use Default Config ($HOME/.oci/config)"
+    select_config = "Select a config file"
+    enter_config = "Enter OCI config details"
+    upload_config = "Upload config file"
+    enter_config_location = "Enter config file location"
+    upload_key_file = "Upload Key file"
+    enter_key_file_location = "Enter key file location"
+    oci_profile_default = "DEFAULT"
+    oci_profile_enter = "Enter OCI Profile"
+
+
+def collect_oci_config() -> None:
+    state.stage = collect_oci_config
+    state.form_error = None
+    state.oci_profile = "DEFAULT"
+    state.oci_passphrase = ""
+    if st.radio("Specify OCI config:",
+             [Choices.use_default_config, Choices.select_config, Choices.enter_config], key="specify_config",
+             ):
+        match state.specify_config:
+            case Choices.select_config:
+                if st.radio("", [Choices.upload_config, Choices.enter_config_location],
+                         key="specify_select_config"):
+                    match state.specify_select_config:
+                        case Choices.upload_config:
+                            st.file_uploader("Choose oci config file", None, False,
+                                             key="uploaded_config_file", )
+                        case Choices.enter_config_location:
+                            st.text_input("OCI config file location",
+                                          key="config_file_location")
+            case Choices.enter_config:
+                st.text_input("User OCID:", key="oci_user", )
+                st.text_input("Key Fingerprint:", key="oci_fingerprint", )
+                st.text_input("Key Passphrase:", key="oci_passphrase", type="password")
+                st.text_input("Tenancy OCID:", key="oci_tenancy")
+                st.text_input("Region:", key="oci_region", )
+                if st.radio("", [Choices.upload_key_file, Choices.enter_key_file_location], key="specify_key_file"):
+                    match state.specify_key_file:
+                        case Choices.upload_key_file:
+                            st.file_uploader("Choose oci key file", None, False,
+                                             key="uploaded_key_file")
+                        case Choices.enter_key_file_location:
+                            st.text_input("OCI key file location", None, False,
+                                          key="oci_keyfile")
+
+        if (state.specify_config == Choices.use_default_config) or (state.specify_config ==  Choices.select_config):
+            if st.radio("OCI Config profile",
+                        [Choices.oci_profile_default, Choices.oci_profile_enter],
+                        key="specify_oci_profile"):
+                match state.specify_oci_profile:
+                    case Choices.oci_profile_default:
+                        state.oci_profile = Choices.oci_profile_default
+                    case Choices.oci_profile_enter:
+                        st.text_input("OCI config profile", key="oci_profile")
+
+
+    st.button(label="Connect", type="primary", on_click=create_connection)
+
+def create_connection() -> None:
+    match state.specify_config:
+        case Choices.use_default_config:
+            state.atp_connection = st.connection(
+                "atpconnection", type=ATPConnection,
+                oci_profile=state.oci_profile
+            )
+        case Choices.select_config:
+            match state.specify_select_config:
+                case Choices.upload_config:
+                    if state.uploaded_config_file is not None:
+                        state.config_file_location = write_files(state.uploaded_config_file.getvalue(), False)
+                    else:
+                        state.form_error = st.error("OCI config file not uploaded")
+            if (state.config_file_location is not None) and (state.config_file_location != ""):
+                state.atp_connection = st.connection(
+                    "atpconnection", type=ATPConnection,
+                    config_file=state.config_file_location,
+                    oci_profile=state.oci_profile
+                )
+            else:
+                state.form_error = st.error("OCI config file location not specified")
+        case Choices.enter_config:
+            match state.specify_key_file:
+                case Choices.upload_key_file:
+                    if state.uploaded_key_file is not None:
+                        state.oci_keyfile = write_files(state.uploaded_key_file.getvalue(), False)
+                    else:
+                        form_error = st.error("OCI key file not uploaded")
+            if (state.oci_keyfile is None) or (state.oci_keyfile == ""):
+                state.form_error = st.error("OCI key file location not specified")
+            if (state.oci_user is None) or (state.oci_user == ""):
+                state.form_error = st.error("OCI User OCID not specified")
+            if (state.oci_fingerprint is None) or (state.oci_fingerprint == ""):
+                state.form_error = st.error("Key fingerprint not specified")
+            if (state.oci_tenancy is None) or (state.oci_tenancy == ""):
+                state.form_error = st.error("Tenancy not specified")
+            if (state.oci_region is None) or (state.oci_region == ""):
+                state.form_error = st.error("Region not specified")
+            if state.form_error is None:
+                config = {
+                    "oci_keyfile": state.oci_keyfile,
+                    "oci_user": state.oci_user,
+                    "oci_fingerprint": state.oci_fingerprint,
+                    "oci_tenancy": state.oci_tenancy,
+                    "oci_region": state.oci_region,
+                    "oci_passphrase": state.oci_passphrase
+                }
+                state.atp_connection = st.connection(
+                    "atpconnection", type=ATPConnection,
+                    config=config
+                )
+
+    if state.form_error is not None:
+        st.markdown("Please fix errors :error")
+    else:
+        state.completed_stage = collect_oci_config
+        state.stage = start
 
 
 def start() -> None:
     state.stage = start
-    with st.form("compartment_id_form", clear_on_submit=True, border=0):
-        st.text_input(label="Compartment ID", value=os.environ.get("default_compartment_id"), key="compartment_id")
-        st.form_submit_button(label="Fetch ATPs", type="primary", on_click=process)
-    state.completed_stage = start
+    atp_connection = cast(ATPConnection, state.atp_connection)
+    st.text_input(label="Compartment ID", value=os.environ.get("default_compartment_id"), key="compartment_id")
+    if st.button(label="Fetch ATPs", type="primary"):
+        atp_connection.fetch_atp_instances(state.compartment_id)
+        process()
 
 
 def process() -> None:
+    state.completed_stage = start
     state.stage = process
-    state.atp_connection = st.connection(
-        "atpconnection", type=ATPConnection,
-        compartment_id=state.compartment_id
-    )
     st.subheader("Please select a database")
     cols = st.columns((4, 1, 1), )
     fields = ["ID", 'Name', 'Action']
@@ -86,10 +198,10 @@ def process() -> None:
                 'atp_id': atp.id
             }
             action.button(key=atp.id, label="Select", on_click=select, kwargs=params)
-    state.completed_stage = process
 
 
 def select(**kwargs) -> None:
+    state.completed_stage = process
     state.stage = select
     if "atp_id" not in state:
         state.atp_id = kwargs.get("atp_id")
@@ -136,32 +248,35 @@ def connect() -> None:
             creds=state.password,
             connect_string=state.connect_string)
     state.completed_stage = connect
-    execute()
+    state.stage = execute
 
 
 def execute() -> None:
     state.stage = execute
-    with st.form("query_form", clear_on_submit=True, border=0):
-        st.text_area(label="Enter SQL query to execute", key="query")
-        col1, col2, col3 = st.columns(3)
-        col1.form_submit_button(label="Execute", on_click=fetch)
-        col2.form_submit_button(label="Load Data", on_click=load_data)
-        col3.form_submit_button(label="Prepare Data", on_click=prepare_data)
+    col1, col2, col3 = st.columns(3)
+    col1.button(label="Execute SQL Query", on_click=run_query)
+    col2.button(label="Load CSV Data",on_click=load_data)
+    col3.button(label="Prepare Products Data", on_click=prepare_data)
     state.completed_stage = execute
+
+def run_query() -> None:
+    state.stage = run_query
+    with st.form("sql_query", clear_on_submit=True, enter_to_submit=False, border=0):
+        st.text_area(label="Enter SQL query to execute", key="query")
+        col1, col2 = st.columns(2)
+        col1.form_submit_button("Run", on_click=fetch)
+        col2.form_submit_button("Back", on_click=execute)
+        state.completed_stage = run_query
 
 
 def fetch() -> None:
     state.stage = fetch
-    with st.form("result_form", clear_on_submit=True, border=0):
-        with st.spinner("Loading.."):
-            connection = cast(ATPConnection, state.atp_connection)
-            data = connection.execute(state.query)
-            st.table(data)
-        col1, col2, col3 = st.columns(3)
-        col1.form_submit_button(label="Execute another", on_click=execute)
-        col2.form_submit_button(label="Start Again", on_click=reset)
-        col3.form_submit_button(label="Load Data", on_click=load_data)
-    state.completed_stage = fetch
+    with st.spinner("Loading.."):
+        connection = cast(ATPConnection, state.atp_connection)
+        data = connection.execute(state.query)
+        st.table(data)
+        st.button("Back", on_click=run_query)
+        state.completed_stage = fetch
 
 
 def reset() -> None:
@@ -173,39 +288,32 @@ def reset() -> None:
 
 def load_data() -> None:
     state.stage = load_data
-    with st.form("load_csv_form", clear_on_submit=True, border=0):
+    with st.form("load_data", clear_on_submit=True, enter_to_submit=False, border=0):
         st.subheader("Load CSV", divider="gray")
         st.text_input(label="CSV URL", key='csv_url')
         st.text_input(label="Table Name", key="table_name")
         st.checkbox(label="Drop existing table?", value=True, key="create_table")
         st.number_input(label="Char column size", value=default_char_col_size, key="char_col_size")
         col1, col2 = st.columns(2)
-        col1.form_submit_button(label="Submit", type="primary", on_click=exec_load_data)
-        col2.form_submit_button(label="Load another CSV", on_click=load_data)
-    state.completed_stage = load_data
+        col1.form_submit_button("Load", on_click=conn_load_csv)
+        col2.form_submit_button("Back", on_click=execute)
+        state.completed_stage = load_data
 
-
-def exec_load_data() -> None:
-    state.stage = exec_load_data
-    with st.spinner("Loading Data.."):
+def conn_load_csv() -> None:
+    state.stage = conn_load_csv
+    with st.spinner("Loading.."):
         connection = cast(ATPConnection, state.atp_connection)
         connection.load_csv(state.table_name, state.create_table, state.char_col_size, state.csv_url, sep="\t",
                             header=0, index_col=0)
-    st.button("Preview Data", on_click=connection.preview_data, args=(state.table_name, show_buttons,))
-    state.completed_stage = exec_load_data
-
-
-def show_buttons() -> None:
-    state.stage = show_buttons
-    col1, col2, col3 = st.columns(3)
-    col1.button(label="Load another CSV", on_click=load_data)
-    col2.button(label="Execute Query", on_click=fetch)
-    col3.button(label="Prepare Data", on_click=prepare_data)
-    state.completed_stage = show_buttons
-
+        sample_data = connection.sample_data(state.table_name)
+        st.subheader("Preview Data")
+        st.table(sample_data)
+        st.button("Back", on_click=load_data)
+        state.completed_stage = conn_load_csv
 
 def load_docs_in_parallel() -> None:
     state.stage = load_docs_in_parallel
+    st.button("Back", on_click=execute)
     if "all_docs_loaded_from_db" not in state:
         with st.spinner("Loading all documents from db"):
             load_docs_from_db(False)
@@ -263,7 +371,7 @@ def prepare_data() -> None:
             state.splitter = OracleTextSplitter(conn=connection.connection, params=splitter_params)
         with st.spinner("Creating vector store"):
             state.vectorstore = OracleVS.from_documents(
-                chunk_data(state.docs[:5]),
+                chunk_data(state.docs),
                 embedder,
                 client=connection.connection,
                 table_name="oravs",
@@ -271,6 +379,7 @@ def prepare_data() -> None:
             )
             st.markdown(f"Vector Store Table: {state.vectorstore.table_name}")
     state.completed_stage = prepare_data
+    st.button("Back", on_click=execute)
     with st.empty():
         load_docs_in_parallel()
 
@@ -282,7 +391,6 @@ def chunk_data(docs: list[Document]) -> list[Document]:
         chunks = state.splitter.split_text(doc.page_content)
         for ic, chunk in enumerate(chunks, start=1):
             chunk_metadata = doc.metadata.copy()
-            #chunk_metadata["id"] = str(chunk_metadata["product_id"]) + "$" + str(id) + "$" + str(ic)
             chunk_metadata["product_text_id"] = str(id)
             chunk_metadata["product_text_summary"] = str(summ[0])
             chunks_with_mdata.append(
@@ -290,12 +398,11 @@ def chunk_data(docs: list[Document]) -> list[Document]:
             )
     return chunks_with_mdata
 
-
 def load_docs_from_db(limit: bool) -> None:
     connection = cast(ATPConnection, state.atp_connection)
     sql_stmt = "select product_id, product_name, COALESCE(product_description, product_name) as product_text from products"
     if limit:
-        sql_stmt = f"{sql_stmt} FETCH FIRST 200 ROWS ONLY"
+        sql_stmt = f"{sql_stmt} FETCH FIRST 100 ROWS ONLY"
     product_text_pd = pd.read_sql(
         sql_stmt,
         connection.engine)
@@ -306,7 +413,6 @@ def load_docs_from_db(limit: bool) -> None:
         )
         .load()
     )
-
 
 def load_onnx_model() -> None:
     state.stage = load_onnx_model
@@ -337,7 +443,6 @@ def load_onnx_model() -> None:
         raise
     state.completed_stage = load_onnx_model
 
-
 def test_embedding() -> None:
     state.stage = test_embedding
     connection = cast(ATPConnection, state.atp_connection)
@@ -347,13 +452,14 @@ def test_embedding() -> None:
     st.markdown(f"Embedding for Hello World! generated by OracleEmbeddings: {embed}")
     state.completed_stage = test_embedding
 
-
 if "stage" in state:
     print(state.stage)
+    print("completed_stage" not in state)
+    #print(state.completed_stage.__name__)
 if ("stage" in state) and (
         ("completed_stage" not in state) or (state.completed_stage.__name__ != state.stage.__name__)):
     print("starting " + state.stage.__name__)
     state.stage()
 else:
     if "stage" not in state:
-        collect_data()
+        collect_oci_config()

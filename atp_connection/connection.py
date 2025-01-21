@@ -28,12 +28,16 @@ class ATPConnection(BaseConnection):
         connection_name: str, **kwargs
     ) -> None:
         input_config = kwargs.get("config")
-        self.config = oci_config(input_config)
+        input_config_file = kwargs.get("config_file")
+        profile = kwargs.get("oci_profile")
+        self.config = oci_config(input_config,input_config_file,profile)
         super().__init__(connection_name, **kwargs)
 
     def _connect(self, **kwargs) -> None:
         self.db_client = oci.database.DatabaseClient(self.config)
-        response = self.db_client.list_autonomous_databases(kwargs.get("compartment_id"))
+
+    def fetch_atp_instances(self, compartment_id: str) -> None:
+        response = self.db_client.list_autonomous_databases(compartment_id)
         for atp_data in response.data:
             atp = cast(oci.database.models.autonomous_database.AutonomousDatabase, atp_data)
             self.atp_instances[atp.id] = atp
@@ -43,7 +47,7 @@ class ATPConnection(BaseConnection):
         wallet_options = oci.database.models.GenerateAutonomousDatabaseWalletDetails(generate_type="ALL",password=wallet_passwd,is_regional=False)
         wallet_response = self.db_client.generate_autonomous_database_wallet(autonomous_database_id=atp_id, generate_autonomous_database_wallet_details=wallet_options)
         mem_file = io.BytesIO(wallet_response.data.content)
-        wallet_location = write_files(mem_file)
+        wallet_location = write_files(mem_file, True)
         ora_connection = oracledb.connect(
             user=user,
             password=creds,
@@ -98,15 +102,14 @@ class ATPConnection(BaseConnection):
 
 
 
-    def preview_data(self, table_name: str, callback) -> None:
+    def sample_data(self, table_name: str) -> DataFrame:
         df = pd.DataFrame()
         reader = pd.read_sql(f"select * from {table_name} FETCH FIRST 50 ROWS ONLY",
                              self.engine,
                              chunksize=10)
         for chunk in reader:
             df = pd.concat([df, chunk], ignore_index=True)
-        st.table(df)
-        callback()
+        return df
 
 
 
