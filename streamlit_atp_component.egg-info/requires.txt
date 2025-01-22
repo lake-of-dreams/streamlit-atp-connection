@@ -1,6 +1,9 @@
 streamlit>=0.63
 oci>=2.141.1
 oracledb>=2.5.1
+langchain_community>=0.3.14
+langchain_core>=0.3.29
+pandas>=2.2.3
 
 [devel]
 wheel

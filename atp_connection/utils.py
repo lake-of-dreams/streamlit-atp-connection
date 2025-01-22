@@ -1,3 +1,4 @@
+"""Helper methods for ATPConnection"""
 import io
 import re
 import string
@@ -8,11 +9,10 @@ import pathlib
 
 import oci
 
-def write_files(file: io.BytesIO, zip_file : bool) -> str:
+def write_files(file: io.BytesIO | bytes, zip_file : bool) -> str:
     random_path = random_string()
     dir_name = "/tmp/"+random_path
     pathlib.Path(dir_name).mkdir(exist_ok=True)
-    file_location = ""
     if zip_file:
         ZipFile(file).extractall(dir_name)
         file_location = dir_name
@@ -44,39 +44,49 @@ def random_passwd(min_length=8, max_length=15):
 
     return passwd
 
-def extract_zip(input_zip):
-    input_zip = ZipFile(input_zip)
-    return {name: input_zip.read(name) for name in input_zip.namelist()}
-
 def get_config_param(key: str, alt: str, config: Dict[str, Any]) -> Optional[Any]:
     return config.get(key) or config.get(key.upper()) or config.get(alt) or config.get(alt.upper())
 
-def oci_config(config: Optional[Dict[str, Any]] | None, config_file: str | None, profile: str | None) -> Optional[dict]:
-    ociconfig = dict(oci.config.DEFAULT_CONFIG)
-    if config is None:
+def oci_config(**kwargs) -> Optional[dict]:
+    oci_profile = kwargs.get("oci_profile")
+    if oci_profile is None:
         oci_profile = "DEFAULT"
-        if (profile is not None) and (profile != ""):
-            oci_profile = profile
-        if config_file is not None:
-            ociconfig = oci.config.from_file(config_file, oci_profile)
+
+    ociconfig = oci_config_from_dict(kwargs)
+    if ociconfig is None:
+        config_from_kwargs = kwargs.get("config")
+        if config_from_kwargs is not None:
+            ociconfig = oci_config_from_dict(config_from_kwargs)
+            if ociconfig is None:
+                raise "invalid config provided"
         else:
-            ociconfig = oci.config.from_file(oci.config.DEFAULT_LOCATION, oci_profile)
-    else:
-        region = get_config_param("oci_cli_region", "oci_region", config)
-        user = get_config_param("oci_cli_user", "oci_user", config)
-        fingerprint = get_config_param("oci_cli_fingerprint", "oci_fingerprint", config)
-        keyfile = get_config_param("oci_cli_keyfile", "oci_keyfile", config)
-        tenancy = get_config_param("oci_cli_tenancy", "oci_tenancy", config)
-        if region is not None and user is not None and fingerprint is not None and keyfile is not None and tenancy is not None:
-            ociconfig["region"] = region
-            ociconfig["user"] = user
-            ociconfig["fingerprint"] = fingerprint
-            ociconfig["keyfile"] = keyfile
-            ociconfig["tenancy"] = tenancy
-            passphrase = get_config_param("oci_cli_passphrase", "oci_passphrase", config)
-            if passphrase is not None:
-                ociconfig["pass_phrase"] = passphrase
+            config_file_from_kwargs = kwargs.get("config_file")
+            if config_file_from_kwargs is not None:
+                ociconfig = oci.config.from_file(config_file_from_kwargs, oci_profile)
+            else:
+                ociconfig = oci.config.from_file(oci.config.DEFAULT_LOCATION, oci_profile)
 
     oci.config.validate_config(ociconfig)
     return ociconfig
+
+def oci_config_from_dict(config: Optional[Dict[str, Any]]) -> dict[str, Any] | None:
+    region = get_config_param("oci_cli_region", "oci_region", config)
+    user = get_config_param("oci_cli_user", "oci_user", config)
+    fingerprint = get_config_param("oci_cli_fingerprint", "oci_fingerprint", config)
+    keyfile = get_config_param("oci_cli_keyfile", "oci_keyfile", config)
+    tenancy = get_config_param("oci_cli_tenancy", "oci_tenancy", config)
+    if region is not None and user is not None and fingerprint is not None and keyfile is not None and tenancy is not None:
+        ociconfig = dict(oci.config.DEFAULT_CONFIG)
+        ociconfig["region"] = region
+        ociconfig["user"] = user
+        ociconfig["fingerprint"] = fingerprint
+        ociconfig["keyfile"] = keyfile
+        ociconfig["tenancy"] = tenancy
+        passphrase = get_config_param("oci_cli_passphrase", "oci_passphrase", config)
+        if passphrase is not None:
+            ociconfig["pass_phrase"] = passphrase
+        return ociconfig
+    else:
+        return None
+
 

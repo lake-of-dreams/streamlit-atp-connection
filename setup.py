@@ -9,7 +9,7 @@ setuptools.setup(
     name="streamlit_atp_component",
     version="0.0.1",
     author="Ravi Singhal",
-    author_email="ravi.r.singhal@example.com",
+    author_email="ravi.r.singhal@oracle.com",
     description="Streamlit component that allows you to connect to Oracle Autonomous databases using OCI credentials",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -25,6 +25,9 @@ setuptools.setup(
         "streamlit >= 0.63",
         "oci >= 2.141.1",
         "oracledb >= 2.5.1",
+        "langchain_community >= 0.3.14",
+        "langchain_core >= 0.3.29",
+        "pandas >= 2.2.3"
     ],
     extras_require={
         "devel": [

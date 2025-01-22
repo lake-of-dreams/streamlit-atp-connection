@@ -1,3 +1,4 @@
+""" Streamlit ATP connection example."""
 import streamlit as st
 
 prep_page = st.Page("prep.py", title="Data Preparation", icon=":material/database:")

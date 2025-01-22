@@ -1,12 +1,11 @@
+""" Streamlit ATP connection example."""
 import os
 from enum import StrEnum
-from threading import Thread
 from typing import cast
 
-import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_community.document_loaders import DataFrameLoader, OracleTextSplitter
+from langchain_community.document_loaders import OracleTextSplitter
 from langchain_community.embeddings.oracleai import OracleEmbeddings
 from langchain_community.utilities import OracleSummary
 from langchain_community.vectorstores.oraclevs import OracleVS
@@ -41,16 +40,6 @@ default_query = "select 1 from dual"
 default_char_col_size = 1000
 state = st.session_state
 
-
-class WorkerThread(Thread):
-    def __init__(self, func):
-        super().__init__()
-        self.func = func
-
-    def run(self):
-        self.func()
-
-
 class Choices(StrEnum):
     use_default_config = "Use Default Config ($HOME/.oci/config)"
     select_config = "Select a config file"
@@ -61,6 +50,8 @@ class Choices(StrEnum):
     enter_key_file_location = "Enter key file location"
     oci_profile_default = "DEFAULT"
     oci_profile_enter = "Enter OCI Profile"
+    upload_model = "Upload model file"
+    enter_model_location = "Enter Model file location"
 
 
 def collect_oci_config() -> None:
@@ -106,8 +97,6 @@ def collect_oci_config() -> None:
                         state.oci_profile = Choices.oci_profile_default
                     case Choices.oci_profile_enter:
                         st.text_input("OCI config profile", key="oci_profile")
-
-
     st.button(label="Connect", type="primary", on_click=create_connection)
 
 def create_connection() -> None:
@@ -253,10 +242,12 @@ def connect() -> None:
 
 def execute() -> None:
     state.stage = execute
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.button(label="Execute SQL Query", on_click=run_query)
     col2.button(label="Load CSV Data",on_click=load_data)
-    col3.button(label="Prepare Products Data", on_click=prepare_data)
+    col3.button(label="Load ONNX Model", on_click=load_onnx_model)
+    col4.button(label="Generate Embeddings", on_click=test_embedding)
+    col5.button(label="Prepare Products Data", on_click=prepare_data)
     state.completed_stage = execute
 
 def run_query() -> None:
@@ -339,16 +330,9 @@ def load_docs_in_parallel() -> None:
 def prepare_data() -> None:
     state.stage = prepare_data
     connection = cast(ATPConnection, state.atp_connection)
-    state.onnx_model_loaded = True
-    if "onnx_model_loaded" not in state:
-        with st.spinner("Loading ONNX model"):
-            load_onnx_model()
-            state.onnx_model_loaded = True
-    state.embedding_tested = True
-    if "embedding_tested" not in state:
-        with st.spinner("Testing embedding"):
-            test_embedding()
-            state.embedding_tested = True
+    # Example assumes that model from https://oracle-base.com/articles/23/ai-vector-search-23 is loaded with name all_MiniLM_L12_v2
+    if "model_name" not in state:
+        state.model_name = "all_MiniLM_L12_v2"
     if "sample_docs_loaded" not in state:
         with st.spinner("Loading documents"):
             load_docs_from_db(True)
@@ -356,7 +340,7 @@ def prepare_data() -> None:
             state.sample_docs_loaded = True
     if "vectorstore" not in state:
         with st.spinner("Init embedder"):
-            embedder_params = {"provider": "database", "model": os.environ.get("model_name")}
+            embedder_params = {"provider": "database", "model": state.model_name}
             embedder = OracleEmbeddings(conn=connection.connection, params=embedder_params)
         with st.spinner("Init summary generator"):
             summary_params = {
@@ -379,7 +363,7 @@ def prepare_data() -> None:
             )
             st.markdown(f"Vector Store Table: {state.vectorstore.table_name}")
     state.completed_stage = prepare_data
-    st.button("Back", on_click=execute)
+    st.button("Start over", key="back_to_execute",on_click=execute)
     with st.empty():
         load_docs_in_parallel()
 
@@ -402,63 +386,61 @@ def load_docs_from_db(limit: bool) -> None:
     connection = cast(ATPConnection, state.atp_connection)
     sql_stmt = "select product_id, product_name, COALESCE(product_description, product_name) as product_text from products"
     if limit:
-        sql_stmt = f"{sql_stmt} FETCH FIRST 100 ROWS ONLY"
-    product_text_pd = pd.read_sql(
-        sql_stmt,
-        connection.engine)
-    state.docs = (
-        DataFrameLoader(
-            product_text_pd,
-            page_content_column='product_text'
-        )
-        .load()
-    )
+        sql_stmt = f"{sql_stmt} FETCH FIRST 50 ROWS ONLY"
+    state.docs = connection.load_records_as_documents(sql_stmt, "product_text")
 
 def load_onnx_model() -> None:
     state.stage = load_onnx_model
-    connection = cast(ATPConnection, state.atp_connection)
-    try:
-        if connection.connection is None or os.environ.get("model_dir") is None or os.environ.get(
-                "model_file") is None or os.environ.get("model_name") is None:
-            raise Exception("Invalid input")
-        with open(f"{os.environ.get("model_dir")}/{os.environ.get("model_file")}", 'rb') as f:
-            model_data = f.read()
-        curr = connection.connection.cursor()
-        curr.execute(
-            """
-            begin
-                dbms_data_mining.drop_model(model_name => :model_name, force => true);
-                SYS.DBMS_VECTOR.load_onnx_model(:model_name, :model_data, 
-                    json('{"function" : "embedding", 
-                        "embeddingOutput" : "embedding", 
-                        "input": {"input": ["DATA"]}}'));
-            end;""",
-            model_name=os.environ.get("model_name"),
-            model_data=model_data
-        )
-        curr.close()
+    with st.form("load_onnx_model", clear_on_submit=True, enter_to_submit=False, border=0):
+        st.subheader("Load ONNX Model", divider="gray")
+        state.model_location = os.environ.get("model_file") or ""
+        state.model_name = os.environ.get("model_name") or ""
+        if (state.model_location is None) or (state.model_location == "") or (state.model_name is None) or (
+                state.model_name == ""):
+            st.text_input("Enter model name", key="model_name")
+            st.file_uploader("Choose model file", None, False,
+                             key="uploaded_model_file", )
+            st.text_input("Model file location",
+                          key="model_location", disabled=(state.uploaded_model_file is not None))
+        col1, col2 = st.columns(2)
+        col1.form_submit_button("Load", on_click=conn_load_onnx_model)
+        col2.form_submit_button("Back", on_click=execute)
+        state.completed_stage = load_onnx_model
 
-    except Exception as ex:
-        curr.close()
-        raise
-    state.completed_stage = load_onnx_model
+def conn_load_onnx_model() -> None:
+    state.stage = conn_load_onnx_model
+    with st.spinner("Loading.."):
+        connection = cast(ATPConnection, state.atp_connection)
+        if state.uploaded_model_file is not None:
+            state.model_location = write_files(state.uploaded_model_file.getvalue(), False)
+        connection.load_onnx_model(state.model_location, state.model_name)
+        st.markdown("Successfully loaded model")
+        st.button("Back", on_click=load_onnx_model)
+        state.completed_stage = conn_load_onnx_model
 
 def test_embedding() -> None:
     state.stage = test_embedding
-    connection = cast(ATPConnection, state.atp_connection)
-    embedder_params = {"provider": "database", "model": os.environ.get("model_name")}
-    embedder = OracleEmbeddings(conn=connection.connection, params=embedder_params)
-    embed = embedder.embed_query("Hello World!")
-    st.markdown(f"Embedding for Hello World! generated by OracleEmbeddings: {embed}")
-    state.completed_stage = test_embedding
+    with st.form("test_embedding", clear_on_submit=True, enter_to_submit=False, border=0):
+        st.subheader("Generate Embedding", divider="gray")
+        st.text_input("Enter text to generate embedding", key="embed_query")
+        if "model_name" not in state:
+            st.text_input("Enter model name to generate embedding", key="model_name")
+        col1, col2 = st.columns(2)
+        col1.form_submit_button("Go", on_click=conn_test_embedding)
+        col2.form_submit_button("Back", on_click=execute)
+        state.completed_stage = test_embedding
 
-if "stage" in state:
-    print(state.stage)
-    print("completed_stage" not in state)
-    #print(state.completed_stage.__name__)
+def conn_test_embedding() -> None:
+    state.stage = conn_test_embedding
+    with st.spinner("Loading.."):
+        connection = cast(ATPConnection, state.atp_connection)
+        st.markdown(
+            f"Embedding for {state.embed_query} generated by model {state.model_name}: {connection.create_embedding(state.model_name, state.embed_query)}")
+        st.button("Back", on_click=test_embedding)
+        state.completed_stage = conn_test_embedding
+
 if ("stage" in state) and (
         ("completed_stage" not in state) or (state.completed_stage.__name__ != state.stage.__name__)):
-    print("starting " + state.stage.__name__)
     state.stage()
 else:
     if "stage" not in state:
