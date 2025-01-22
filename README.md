@@ -8,12 +8,6 @@ Streamlit ATP Connection is a Python library and Streamlit component that connec
 
 The Streamlit ATP Connection is built upon tools provided by [OCI Python SDK](https://github.com/oracle/oci-python-sdk) , the [python-oracledb](https://oracle.github.io/python-oracledb/) driver and [langchain](https://python.langchain.com/docs/concepts/) interfaces.
 
-## Demo application
-
-You can try the demo application of DynamoDB Connection at [https://st-dynamodb-connection.streamlit.app](https://st-dynamodb-connection.streamlit.app).
-
-![Demo application](https://github.com/mrtj/st-dynamodb-connection/blob/main/docs/pandas_api.png?raw=true "Demo application")
-
 ## Getting started
 
 ### Installation
