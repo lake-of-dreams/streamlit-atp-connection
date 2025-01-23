@@ -6,7 +6,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
 setuptools.setup(
-    name="streamlit_atp_component",
+    name="streamlit_atp_connection",
     version="0.0.1",
     author="Ravi Singhal",
     author_email="ravi.r.singhal@oracle.com",
