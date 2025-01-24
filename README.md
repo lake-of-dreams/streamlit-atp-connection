@@ -15,7 +15,7 @@ The Streamlit ATP Connection is built upon tools provided by [OCI Python SDK](ht
 You can install Streamlit ATP Connections with pip:
 
 ```shell
-pip install streamlit-atp-connection
+pip install -U git+https://github.com/lake-of-dreams/streamlit-atp-connection
 ```
 
 ### OCI credentials
